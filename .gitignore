@@ -1,7 +1,7 @@
 # Ignore this files
 
-my-project/bin/*
-my-project/generated.*
+**/bin/*
+**/generated.*
 
 
 # Ignore all outputs from the compiler
