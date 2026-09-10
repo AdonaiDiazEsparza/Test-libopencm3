@@ -2,7 +2,7 @@ PROJECT = template
 BUILD_DIR = bin
 
 SHARED_DIR = 
-CFILES = template.c
+CFILES = main.c
 # CFILES += api.c
 # AFILES += api-asm.S
 
