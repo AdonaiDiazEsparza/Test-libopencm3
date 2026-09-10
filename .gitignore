@@ -1,1 +1,20 @@
 # Ignore this files
+
+my-project/bin/*
+my-project/generated.*
+
+
+# Ignore all outputs from the compiler
+*.bin
+*.map
+*.hex
+*.uf2
+*.lst
+*.elf
+*.d
+*.o
+*.obj
+*.lib
+*.exp
+*.res
+*.manifest

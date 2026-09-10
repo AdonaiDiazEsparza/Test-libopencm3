@@ -27,9 +27,11 @@
 ### TODO/FIXME/notes ###
 # No support for stylecheck.
 # No support for BMP/texane/random flash methods, no plans either
-# No support for magically finding the library.
 # C++ hasn't been actually tested with this..... sorry bout that. ;)
 # Second expansion/secondary not set, add this if you need them.
+
+# Directory of this file (repo root), even when included from a subproject.
+RULES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 BUILD_DIR ?= bin
 OPT ?= -Os
@@ -43,6 +45,18 @@ Q	:= @
 NULL	:= 2>/dev/null
 endif
 
+# genlink-config.mk only sets LIBNAME if the archive already exists.
+# On a first build, derive it from the device family and compile libopencm3.
+ifeq ($(LIBNAME),)
+ifneq ($(genlink_family),)
+LIBNAME = opencm3_$(genlink_family)
+LDLIBS := $(filter-out -l,$(LDLIBS))
+LDLIBS += -l$(LIBNAME)
+LIBDEPS := $(filter-out $(OPENCM3_DIR)/lib/lib.a,$(LIBDEPS))
+LIBDEPS += $(OPENCM3_DIR)/lib/lib$(LIBNAME).a
+endif
+endif
+
 # Tool paths.
 PREFIX	?= arm-none-eabi-
 CC	= $(PREFIX)gcc
@@ -50,7 +64,16 @@ CXX	= $(PREFIX)g++
 LD	= $(PREFIX)gcc
 OBJCOPY	= $(PREFIX)objcopy
 OBJDUMP	= $(PREFIX)objdump
+SIZE	= $(PREFIX)size
+PYTHON	?= python3
 OOCD	?= openocd
+UF2_BASE ?= 0x08000000
+BIN2UF2  = $(RULES_DIR)bin2uf2.py
+ifeq ($(UF2_FAMILY_ID),)
+UF2_FAMILY_FLAG = --device "$(DEVICE)"
+else
+UF2_FAMILY_FLAG = --family $(UF2_FAMILY_ID)
+endif
 
 OPENCM3_INC = $(OPENCM3_DIR)/include
 
@@ -60,7 +83,8 @@ INCLUDES += $(patsubst %,-I%, . $(OPENCM3_INC) )
 OBJS = $(CFILES:%.c=$(BUILD_DIR)/%.o)
 OBJS += $(CXXFILES:%.cxx=$(BUILD_DIR)/%.o)
 OBJS += $(AFILES:%.S=$(BUILD_DIR)/%.o)
-GENERATED_BINS = $(PROJECT).elf $(PROJECT).bin $(PROJECT).map $(PROJECT).list $(PROJECT).lss
+GENERATED_BINS = $(PROJECT).elf $(PROJECT).bin $(PROJECT).hex $(PROJECT).uf2 \
+		$(PROJECT).map $(PROJECT).list $(PROJECT).lss
 
 TGT_CPPFLAGS += -MD
 TGT_CPPFLAGS += -Wall -Wundef $(INCLUDES)
@@ -83,7 +107,13 @@ TGT_ASFLAGS += $(OPT) $(ARCH_FLAGS) -ggdb3
 
 TGT_LDFLAGS += -T$(LDSCRIPT) -L$(OPENCM3_DIR)/lib -nostartfiles
 TGT_LDFLAGS += $(ARCH_FLAGS)
+# ARM GNU toolchain / Ubuntu ship newlib-nano (nano.specs).
+# Debian/Kali currently ship picolibc instead.
+ifeq ($(shell $(CC) -print-file-name=nano.specs),nano.specs)
+TGT_LDFLAGS += -specs=picolibc.specs
+else
 TGT_LDFLAGS += -specs=nano.specs
+endif
 TGT_LDFLAGS += -Wl,--gc-sections
 # OPTIONAL
 #TGT_LDFLAGS += -Wl,-Map=$(PROJECT).map
@@ -101,7 +131,7 @@ LDLIBS += -Wl,--start-group -lc -lgcc -lnosys -Wl,--end-group
 
 # Burn in legacy hell fortran modula pascal yacc idontevenwat
 .SUFFIXES:
-.SUFFIXES: .c .S .h .o .cxx .elf .bin .list .lss
+.SUFFIXES: .c .S .h .o .cxx .elf .bin .hex .uf2 .list .lss
 
 # Bad make, never *ever* try to get a file out of source control by yourself.
 %: %,v
@@ -110,8 +140,36 @@ LDLIBS += -Wl,--start-group -lc -lgcc -lnosys -Wl,--end-group
 %: s.%
 %: SCCS/s.%
 
-all: $(PROJECT).elf $(PROJECT).bin
+all: $(PROJECT).elf $(PROJECT).bin $(PROJECT).hex $(PROJECT).uf2 size
 flash: $(PROJECT).flash
+size: $(PROJECT).elf
+	@printf "  SIZE\t$<\n"
+	$(Q)$(SIZE) $<
+	$(Q)$(SIZE) $< | awk -v ldscript="$(LDSCRIPT)" '\
+		function bytes(v) { \
+			gsub(/,/, "", v); \
+			if (v ~ /[Kk]$$/) return substr(v,1,length(v)-1)*1024; \
+			if (v ~ /[Mm]$$/) return substr(v,1,length(v)-1)*1024*1024; \
+			return v+0; \
+		} \
+		BEGIN { \
+			while ((getline line < ldscript) > 0) { \
+				n = split(line, f); \
+				for (i = 1; i <= n; i++) { \
+					if (f[i] != "LENGTH") continue; \
+					len = bytes(f[i+2]); \
+					if (line ~ /^[ \t]*rom /) rom_max = len; \
+					if (line ~ /^[ \t]*ram /) ram_max = len; \
+				} \
+			} \
+			close(ldscript); \
+		} \
+		NR == 2 { \
+			rom = $$1 + $$2; \
+			ram = $$2 + $$3; \
+			printf "  ROM\t%d / %d bytes (%.2f%%)\n", rom, rom_max, (rom_max ? 100*rom/rom_max : 0); \
+			printf "  RAM\t%d / %d bytes (%.2f%%)  [static: data+bss]\n", ram, ram_max, (ram_max ? 100*ram/ram_max : 0); \
+		}'
 
 # error if not using linker script generator
 ifeq (,$(DEVICE))
@@ -125,6 +183,11 @@ GENERATED_BINS += $(LDSCRIPT)
 endif
 
 # Need a special rule to have a bin dir
+# First-time (or after a library clean): stm32f4 -> TARGETS=stm32/f4
+$(OPENCM3_DIR)/lib/libopencm3_%.a:
+	@printf "  BUILD\tlibopencm3 ($*)\n"
+	$(Q)$(MAKE) -C $(OPENCM3_DIR) PREFIX="$(PREFIX)" TARGETS="$(patsubst stm32%,stm32/%,$*)"
+
 $(BUILD_DIR)/%.o: %.c
 	@printf "  CC\t$<\n"
 	@mkdir -p $(dir $@)
@@ -147,6 +210,14 @@ $(PROJECT).elf: $(OBJS) $(LDSCRIPT) $(LIBDEPS)
 %.bin: %.elf
 	@printf "  OBJCOPY\t$@\n"
 	$(Q)$(OBJCOPY) -O binary  $< $@
+
+%.hex: %.elf
+	@printf "  OBJCOPY\t$@\n"
+	$(Q)$(OBJCOPY) -O ihex $< $@
+
+%.uf2: %.bin
+	@printf "  UF2\t$@\n"
+	$(Q)$(PYTHON) $(BIN2UF2) --base $(UF2_BASE) $(UF2_FAMILY_FLAG) -o $@ $<
 
 %.lss: %.elf
 	$(OBJDUMP) -h -S $< > $@
@@ -172,6 +243,6 @@ endif
 clean:
 	rm -rf $(BUILD_DIR) $(GENERATED_BINS)
 
-.PHONY: all clean flash
+.PHONY: all clean flash size
 -include $(OBJS:.o=.d)
 
