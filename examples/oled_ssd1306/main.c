@@ -3,6 +3,18 @@
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/systick.h>
 
+/*
+* To solve the resolution display, we need to define the CONFIG_RESOLUTION_128X64 flag
+* in the Makefile
+* This flag is used to define the resolution of the display
+* If we don't define this flag, the display will be 128x64
+* If we define this flag, the display will be 128x32
+* This is used to define the resolution of the display
+* If we don't define this flag, the display will be 128x64
+* If we define this flag, the display will be 128x32
+* This is used to define the resolution of the display
+*/
+
 #include "minimal_oled.h"
 
 
@@ -74,7 +86,7 @@ int main(void)
 {
 	clock_setup();
 	systick_setup();
-	gpio_setup();
+	// gpio_setup();
 	oled_init(I2C1);
 
 

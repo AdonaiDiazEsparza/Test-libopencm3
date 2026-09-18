@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 // oled definitions
-#define OLED_ADDR         0x3C    // oled write address (0x3C << 1)
+#define OLED_ADDR         0x3C    // 7-bit I2C address (libopencm3 shifts it)
 #define OLED_CMD_MODE     0x00    // set command mode
 #define OLED_DAT_MODE     0x40    // set data mode
 
@@ -42,39 +42,39 @@
 
 #define OLED_HEIGHT 64
 
-static uint8_t SSD1306_128X64_INIT_CMD[] = {
-    OLED_CMD_MODE,
-    OLED_MULTIPLEX,   0x3F,                 // set multiplex ratio  
-    OLED_CHARGEPUMP,  0x14,                 // set DC-DC enable  
-    OLED_MEMORYMODE,  0x00,                 // set horizontal addressing mode
-    OLED_COLUMNS,     0x00, 0x7F,           // set start and end column
-    OLED_PAGES,       0x00, 0x3F,           // set start and end page
-    OLED_COMPINS,     0x12,                 // set com pins
-    OLED_XFLIP, OLED_YFLIP,                 // flip screen
-    OLED_DISPLAY_ON                         // display on
+static const uint8_t SSD1306_128X64_INIT_CMD[] = {
+  OLED_CMD_MODE,
+  OLED_MULTIPLEX,   0x3F,                 // set multiplex ratio  
+  OLED_CHARGEPUMP,  0x14,                 // set DC-DC enable  
+  OLED_MEMORYMODE,  0x00,                 // set horizontal addressing mode
+  OLED_COLUMNS,     0x00, 0x7F,           // set start and end column
+  OLED_PAGES,       0x00, 0x3F,           // set start and end page
+  OLED_COMPINS,     0x12,                 // set com pins
+  OLED_XFLIP, OLED_YFLIP,                 // flip screen
+  OLED_DISPLAY_ON                         // display on
 };
 
 #else
 
 #define OLED_HEIGHT 32
 
-static uint8_t SSD1306_128X32_INIT_CMD[] = {
-    OLED_CMD_MODE,
-    OLED_MULTIPLEX,   0x1F,                 // set multiplex ratio  
-    OLED_CHARGEPUMP,  0x14,                 // set DC-DC enable  
-    OLED_MEMORYMODE,  0x00,                 // set horizontal addressing mode
-    OLED_COLUMNS,     0x00, 0x7F,           // set start and end column
-    OLED_PAGES,       0x00, 0x1F,           // set start and end page
-    OLED_COMPINS,     0x02,                 // set com pins
-    OLED_XFLIP, OLED_YFLIP,                 // flip screen
-    OLED_DISPLAY_ON                         // display on
+static const uint8_t SSD1306_128X32_INIT_CMD[] = {
+  OLED_CMD_MODE,
+  OLED_MULTIPLEX,   0x1F,                 // set multiplex ratio  
+  OLED_CHARGEPUMP,  0x14,                 // set DC-DC enable  
+  OLED_MEMORYMODE,  0x00,                 // set horizontal addressing mode
+  OLED_COLUMNS,     0x00, 0x7F,           // set start and end column
+  OLED_PAGES,       0x00, 0x1F,           // set start and end page
+  OLED_COMPINS,     0x02,                 // set com pins
+  OLED_XFLIP, OLED_YFLIP,                 // flip screen
+  OLED_DISPLAY_ON                         // display on
 };
 
 #endif
 
 #define OLED_NUM_PAGES (OLED_HEIGHT / 8)
 
-uint8_t oled_buf[OLED_NUM_PAGES][OLED_WIDTH];
+static uint8_t oled_buf[OLED_NUM_PAGES][OLED_WIDTH];
 
 static uint32_t oled_i2c;
 
@@ -96,9 +96,9 @@ static void oled_i2c_gpio_setup(uint32_t port, uint16_t pins, uint8_t af)
 * @param data: pointer to the data to transmit
 * @param length: length of the data to transmit
 */
-static void oled_i2c_transmit(uint8_t *data, uint32_t length)
+static void oled_i2c_transmit(const uint8_t *data, uint32_t length)
 {
-    if (length == 0) {
+    if (data == NULL || length == 0) {
         return;
     }
 
@@ -164,17 +164,22 @@ void oled_init(uint32_t i2c)
 */
 void oled_flush_page(uint8_t page)
 {
-    if(page >= OLED_NUM_PAGES) return;
+    uint8_t cmd[] = {
+        OLED_CMD_MODE,
+        OLED_COLUMNS, 0x00, OLED_WIDTH - 1,
+        OLED_PAGES, page, page
+    };
+    uint8_t data[OLED_WIDTH + 1];
 
-    uint8_t oled_buffer[OLED_WIDTH + 1] = {0};
-    oled_buffer[0] = OLED_DAT_MODE;
-
-    for(uint8_t i = 0; i < OLED_WIDTH; i++)
-    {
-        oled_buffer[i + 1] = oled_buf[page][i];
+    if (page >= OLED_NUM_PAGES) {
+        return;
     }
 
-    oled_i2c_transmit(oled_buffer, OLED_WIDTH + 1);
+    oled_i2c_transmit(cmd, sizeof(cmd));
+
+    data[0] = OLED_DAT_MODE;
+    memcpy(&data[1], oled_buf[page], OLED_WIDTH);
+    oled_i2c_transmit(data, sizeof(data));
 }
 
 /*
@@ -289,7 +294,7 @@ static void transpose_letter(const char in[8], uint8_t out[8],uint8_t width, uin
  */
 void oled_draw_char8x8(uint8_t x, uint8_t y, char c)
 {
-  if (c < 32 || c > 127)
+  if (c < 32 || c > 126)
     c = ' ';
   uint8_t transposed[8];
   transpose_letter(font8x8_basic[c - 32], transposed,8,8);
@@ -325,7 +330,7 @@ void oled_print_8x8(uint8_t x, uint8_t y, const char *text)
  */
 void oled_draw_char6x8(uint8_t x, uint8_t y, char c)
 {
-  if (c < 32 || c > 127)
+  if (c < 32 || c > 126)
     c = ' ';
   oled_draw_bmp(x, y, 6, 8, (const uint8_t *)font_6x8[c - 32]);
 }
@@ -359,9 +364,9 @@ void oled_print_6x8(uint8_t x, uint8_t y, const char *text)
  */
 void oled_draw_char5x8(uint8_t x, uint8_t y, char c)
 {
-  if (c < 32 || c > 127)
+  if (c < 32 || c > 126)
     c = ' ';
-  oled_draw_bmp(x, y, 6, 8, (const uint8_t *)font_5x8[c - 32]);
+  oled_draw_bmp(x, y, 5, 8, (const uint8_t *)font_5x8[c - 32]);
 }
 
 /**
@@ -394,8 +399,10 @@ void oled_print_5x8(uint8_t x, uint8_t y, const char *text)
  */
 void oled_draw_hline(uint8_t x, uint8_t y, uint8_t length, bool color)
 {
-    if (y >= OLED_HEIGHT) return;
-    
+    if (y >= OLED_HEIGHT || x >= OLED_WIDTH) {
+        return;
+    }
+
     if (x + length > OLED_WIDTH) {
         length = OLED_WIDTH - x;
     }
@@ -446,8 +453,9 @@ void oled_draw_vline(uint8_t x, uint8_t y, uint8_t length, bool color)
  */
 void oled_draw_rect(uint8_t x, uint8_t y, uint8_t width, uint8_t height, bool color)
 {
-    if (width <= 0 || height <= 0)
+    if (width == 0 || height == 0) {
         return;
+    }
 
     // Top
     oled_draw_hline(x, y, width, color);

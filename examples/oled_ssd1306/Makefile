@@ -10,6 +10,9 @@ CFILES += minimal_oled.c
 DEVICE=stm32f411ceu6
 OOCD_FILE = board/stm32f411ceu6.cfg
 
+# Need this flag for the resolution display
+CFLAGS += -DCONFIG_RESOLUTION_128X64
+
 # You shouldn't have to edit anything below here.
 VPATH += $(SHARED_DIR)
 INCLUDES += $(patsubst %,-I%, . $(SHARED_DIR))
