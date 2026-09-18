@@ -3,7 +3,7 @@ BUILD_DIR = bin
 
 SHARED_DIR = 
 CFILES = main.c
-# CFILES += api.c
+CFILES += minimal_oled.c
 # AFILES += api-asm.S
 
 # TODO - you will need to edit these two lines!

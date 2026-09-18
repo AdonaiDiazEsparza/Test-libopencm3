@@ -3,6 +3,9 @@
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/systick.h>
 
+#include "minimal_oled.h"
+
+
 /**
 * This example of a blink with systick timer
 */
@@ -70,7 +73,14 @@ static void gpio_setup(void)
 int main(void)
 {
 	clock_setup();
+	systick_setup();
 	gpio_setup();
+	oled_init(I2C1);
+
+
+	oled_clear();
+	oled_print_8x8(0,0,"Hola Mundo");
+	oled_flush();
 
 	while (1) {
 		msleep(500);
